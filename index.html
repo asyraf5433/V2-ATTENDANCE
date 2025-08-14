@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Teacher Attendance - Nuh's Ark</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; }
+    input, button { width: 100%; padding: 10px; margin-top: 10px; }
+    #attendance, #confirmation, #adminView, #mapContainer { display: none; }
+    .logout { background-color: #f44336; color: white; margin-top: 20px; }
+    #map { height: 250px; margin-top: 20px; border-radius: 10px; }
+    .adminBtn { background-color: #333; color: white; margin-top: 20px; }
+    textarea { width: 100%; height: 150px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <div id="login">
+    <h2>Login</h2>
+    <input type="text" id="username" placeholder="Enter your name" required>
+    <input type="password" id="password" placeholder="Password" required>
+    <button onclick="login()">Login</button>
+    <p id="loginError" style="color:red;"></p>
+    <button class="adminBtn" onclick="showAdmin()">Admin View</button>
+  </div>
+
+  <div id="attendance">
+    <h2>Welcome, <span id="displayName"></span></h2>
+    <button onclick="clock('in')">Clock In</button>
+    <button onclick="clock('out')">Clock Out</button>
+    <div id="mapContainer">
+      <h4>Your Location</h4>
+      <div id="map"></div>
+    </div>
+    <button class="logout" onclick="logout()">Logout</button>
+  </div>
+
+  <div id="confirmation">
+    <h3><span id="actionName"></span> successful!</h3>
+    <p>Name: <span id="confirmedName"></span></p>
+    <p>Time: <span id="confirmedTime"></span></p>
+    <button onclick="backToMain()">Back</button>
+  </div>
+
+  <div id="adminView">
+    <h2>Admin View</h2>
+    <textarea readonly id="logView"></textarea>
+    <button onclick="backToLogin()">Back to Login</button>
+  </div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const SCHOOL_LAT = 3.081622118207656;
+    const SCHOOL_LNG = 101.49838072472122;
+    const RADIUS = 150; // meters
+
+    const teacherCredentials = {
+      "Imaan Hasbullah": "ImaanHas_Nuhsark93",
+      "Fatin": "FatiN_Nuhsark93",
+      "Aisyah": "AisyaH_Nuhsark93",
+      "Diyanah": "DiyanaH_Nuhsark93",
+      "Aini": "AinI_Nuhsark93"
+    };
+
+    let map, marker;
+
+    function login() {
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+
+      if (teacherCredentials[username] && teacherCredentials[username] === password) {
+        sessionStorage.setItem("teacher", username);
+        document.getElementById("displayName").innerText = username;
+        document.getElementById("login").style.display = "none";
+        document.getElementById("attendance").style.display = "block";
+        initMap();
+        document.getElementById("loginError").innerText = "";
+      } else {
+        document.getElementById("loginError").innerText = "Invalid name or password.";
+      }
+    }
+
+    function initMap() {
+      document.getElementById("mapContainer").style.display = "block";
+      if (!map) {
+        map = L.map('map').setView([SCHOOL_LAT, SCHOOL_LNG], 17);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        L.circle([SCHOOL_LAT, SCHOOL_LNG], { radius: RADIUS, color: 'green' }).addTo(map);
+      }
+
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        if (marker) map.removeLayer(marker);
+        marker = L.marker([lat, lng]).addTo(map).bindPopup("You are here").openPopup();
+        map.setView([lat, lng], 17);
+      }, 
+      () => alert("Location access is required."),
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      });
+    }
+
+    function clock(action) {
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const distance = getDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
+
+        if (distance <= RADIUS) {
+          showConfirmation(action);
+
+          fetch("/log", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: sessionStorage.getItem("teacher"),
+              action,
+              latitude: lat,
+              longitude: lng
+            })
+          });
+
+        } else {
+          alert("You are too far from the school to clock " + action + ". Distance: " + Math.round(distance) + " meters");
+          logFailedAttempt(action, distance);
+        }
+      }, 
+      () => alert("Location permission is required."),
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      });
+    }
+
+    function getDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371e3;
+      const φ1 = lat1 * Math.PI/180;
+      const φ2 = lat2 * Math.PI/180;
+      const Δφ = (lat2-lat1) * Math.PI/180;
+      const Δλ = (lng2-lng1) * Math.PI/180;
+      const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ/2) * Math.sin(Δλ/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    function showConfirmation(action) {
+      const name = sessionStorage.getItem("teacher");
+      const now = new Date().toLocaleString();
+
+      document.getElementById("attendance").style.display = "none";
+      document.getElementById("confirmation").style.display = "block";
+      document.getElementById("actionName").innerText = action === "in" ? "Clock-In" : "Clock-Out";
+      document.getElementById("confirmedName").innerText = name;
+      document.getElementById("confirmedTime").innerText = now;
+    }
+
+    function backToMain() {
+      document.getElementById("confirmation").style.display = "none";
+      document.getElementById("attendance").style.display = "block";
+    }
+
+    function logout() {
+      sessionStorage.removeItem("teacher");
+      document.getElementById("attendance").style.display = "none";
+      document.getElementById("confirmation").style.display = "none";
+      document.getElementById("username").value = "";
+      document.getElementById("password").value = "";
+      document.getElementById("login").style.display = "block";
+    }
+
+    function logFailedAttempt(action, distance) {
+      const logs = JSON.parse(localStorage.getItem("failLogs") || "[]");
+      logs.push({
+        name: sessionStorage.getItem("teacher") || "Unknown",
+        action: action,
+        time: new Date().toLocaleString(),
+        distance: Math.round(distance) + "m"
+      });
+      localStorage.setItem("failLogs", JSON.stringify(logs));
+    }
+
+    function showAdmin() {
+      const logs = JSON.parse(localStorage.getItem("failLogs") || "[]");
+      const logText = logs.map(log => `${log.time} | ${log.name} | Attempted to clock-${log.action} from ${log.distance}`).join("\n");
+      document.getElementById("login").style.display = "none";
+      document.getElementById("adminView").style.display = "block";
+      document.getElementById("logView").value = logText || "No failed attempts logged yet.";
+    }
+
+    function backToLogin() {
+      document.getElementById("adminView").style.display = "none";
+      document.getElementById("login").style.display = "block";
+    }
+  </script>
+</body>
+</html>
